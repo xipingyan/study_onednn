@@ -8,7 +8,7 @@
 #include "oneapi/dnnl/dnnl.hpp"
 #include "oneapi/dnnl/dnnl_debug.h"
 
-// #include "example_utils.hpp"
+#include "example_utils.hpp"
 
 using namespace dnnl;
 // [Prologue]
@@ -16,7 +16,7 @@ using namespace dnnl;
 
 // [Prologue]
 
-void getting_started_tutorial(engine::kind engine_kind) {
+inline void getting_started_tutorial(engine::kind engine_kind) {
     // [Initialize engine]
     engine eng(engine_kind, 0);
     // [Initialize engine]
@@ -136,7 +136,7 @@ void getting_started_tutorial(engine::kind engine_kind) {
     // memory format.
     std::vector<float> relu_image(image_size);
     read_from_dnnl_memory(relu_image.data(), dst_mem);
-    /*
+
     // Check the results
     for (int n = 0; n < N; ++n)
         for (int h = 0; h < H; ++h)
@@ -156,11 +156,10 @@ void getting_started_tutorial(engine::kind engine_kind) {
                     }
                 }
     // [Check the results]
-    */
 }
 
 // [Main]
-int test_relu(int argc, char **argv) {
+int getting_started_test_relu(int argc, char **argv) {
     int exit_code = 0;
 
     engine::kind engine_kind = parse_engine_kind(argc, argv);
