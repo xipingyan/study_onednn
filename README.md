@@ -1,5 +1,12 @@
 # Study oneDNN
 
+# How to build
+
+    $ git submodule update --init
+    $ mkdir build && cd build
+    $ cmake ..
+    $ make -j8
+
 # Reference
 
 [``oneDNN:``](https://oneapi-src.github.io/oneDNN/supported_primitives.html) <br>
