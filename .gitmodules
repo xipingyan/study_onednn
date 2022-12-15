@@ -1,0 +1,6 @@
+[submodule "oneDNN"]
+	path = oneDNN
+	url = https://github.com/oneapi-src/oneDNN.git
+[submodule "3rd/oneDNN"]
+	path = 3rd/oneDNN
+	url = https://github.com/oneapi-src/oneDNN.git
