@@ -20,13 +20,15 @@ using dt = memory::data_type;
 
 void convolution_example(dnnl::engine::kind engine_kind)
 {
+#define ENFORCE_BF16 0
+    std::cout << "enforce_bf16 = " << ENFORCE_BF16 << std::endl;
+
     auto GetDT = [&]()
     {
-#define ENFORCE_BF16 1
 #if ENFORCE_BF16
-        return dt::f32;
-#else
         return dt::bf16;
+#else
+        return dt::f32;
 #endif
     };
 
