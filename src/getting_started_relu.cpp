@@ -363,18 +363,20 @@ inline void getting_started_tutorial(engine::kind engine_kind)
     // memory format.
     std::vector<float> relu_image(image_size);
     read_from_dnnl_memory(relu_image.data(), dst_mem);
-    /*
+
     // Check the results
     for (int n = 0; n < N; ++n)
         for (int h = 0; h < H; ++h)
             for (int w = 0; w < W; ++w)
-                for (int c = 0; c < C; ++c) {
+                for (int c = 0; c < C; ++c)
+                {
                     int off = offset(
-                            n, h, w, c); // get the physical offset of a pixel
+                        n, h, w, c); // get the physical offset of a pixel
                     float expected = image[off] < 0
-                            ? 0.f
-                            : image[off]; // expected value
-                    if (relu_image[off] != expected) {
+                                         ? 0.f
+                                         : image[off]; // expected value
+                    if (relu_image[off] != expected)
+                    {
                         std::cout << "At index(" << n << ", " << c << ", " << h
                                   << ", " << w << ") expect " << expected
                                   << " but got " << relu_image[off]
@@ -382,8 +384,8 @@ inline void getting_started_tutorial(engine::kind engine_kind)
                         throw std::logic_error("Accuracy check failed.");
                     }
                 }
+    std::cout << "Check relu result pass." << std::endl;
     // [Check the results]
-    */
 }
 
 // [Main]
