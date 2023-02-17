@@ -18,18 +18,63 @@ using namespace dnnl;
 using tag = memory::format_tag;
 using dt = memory::data_type;
 
+void get_param_from_macro(bool &enforce_bf16, int &N, int &IC, int &OC, int& LOOP_NUM)
+{
+    std::cout << "==========================\n";
+    std::cout << "ENV: \n";
+    std::cout << " -ONEDNN_VERBOSE (Check oneDNN log): $ export ONEDNN_VERBOSE=2 \n";
+    std::cout << " -enforce_bf16 (default 0): $ export enforce_bf16=1 \n";
+    std::cout << " -N (batch size, default 3): $ export N=1 \n";
+    std::cout << " -IC (input channels, default 32): $ export IC=32 \n";
+    std::cout << " -OC (output channels, default 64): $ export OC=64 \n";
+    std::cout << " -LOOP_NUM (loop count, default 10000): $ export LOOP_NUM=10000 \n";
+
+    std::cout << "Other param: \n"
+              << " -IH = 13, // input height\n"
+              << " -IW = 13, // input width\n"
+              << " -KH = 3, // weights height\n"
+              << " -KW = 3, // weights width\n"
+              << " -PH_L = 1, // height padding: left\n"
+              << " -PH_R = 1, // height padding: right\n"
+              << " -PW_L = 1, // width padding: left\n"
+              << " -PW_R = 1, // width padding: right\n"
+              << " -SH = 4, // height-wise stride\n"
+              << " -SW = 4, // width-wise stride \n";
+    std::cout << "==========================\n";
+
+    if (std::getenv("enforce_bf16"))
+    {
+        enforce_bf16 = static_cast<bool>(std::atoi(std::getenv("enforce_bf16")));
+    }
+
+#define GET_ENV(ENV_NAME, RET_VAL)                                              \
+    if (std::getenv(ENV_NAME))                                                  \
+    {                                                                           \
+        RET_VAL = std::atoi(std::getenv(ENV_NAME));                             \
+        std::cout << "From ENV: " << ENV_NAME << " = " << RET_VAL << std::endl; \
+    }                                                                           \
+    else                                                                        \
+    {                                                                           \
+        std::cout << "Default: " << ENV_NAME << " = " << RET_VAL << std::endl;  \
+    }
+
+    GET_ENV("N", N);
+    GET_ENV("IC", IC);
+    GET_ENV("OC", OC);
+    GET_ENV("LOOP_NUM", LOOP_NUM);
+}
+
 void convolution_example(dnnl::engine::kind engine_kind)
 {
-#define ENFORCE_BF16 0
-    std::cout << "enforce_bf16 = " << ENFORCE_BF16 << std::endl;
-
+    bool enforce_bf16 = false;
+    int N = 3;   // batch size
+    int IC = 32; // input channels
+    int OC = 64; // output channels
+    int LOOP_NUM = 10000;
+    get_param_from_macro(enforce_bf16, N, IC, OC, LOOP_NUM);
     auto GetDT = [&]()
     {
-#if ENFORCE_BF16
-        return dt::bf16;
-#else
-        return dt::f32;
-#endif
+        return enforce_bf16 ? dt::bf16 : dt::f32;
     };
 
     // Create execution dnnl::engine.
@@ -39,21 +84,19 @@ void convolution_example(dnnl::engine::kind engine_kind)
     dnnl::stream engine_stream(engine);
 
     // Tensor dimensions.
-    const memory::dim N = 3, // batch size
-            IC = 32, // input channels
-            IH = 13, // input height
-            IW = 13, // input width
-            OC = 64, // output channels
-            KH = 3, // weights height
-            KW = 3, // weights width
-            PH_L = 1, // height padding: left
-            PH_R = 1, // height padding: right
-            PW_L = 1, // width padding: left
-            PW_R = 1, // width padding: right
-            SH = 4, // height-wise stride
-            SW = 4, // width-wise stride
-            OH = (IH - KH + PH_L + PH_R) / SH + 1, // output height
-            OW = (IW - KW + PW_L + PW_R) / SW + 1; // output width
+    const memory::dim
+        IH = 13,                               // input height
+        IW = 13,                               // input width
+        KH = 3,                                // weights height
+        KW = 3,                                // weights width
+        PH_L = 1,                              // height padding: left
+        PH_R = 1,                              // height padding: right
+        PW_L = 1,                              // width padding: left
+        PW_R = 1,                              // width padding: right
+        SH = 4,                                // height-wise stride
+        SW = 4,                                // width-wise stride
+        OH = (IH - KH + PH_L + PH_R) / SH + 1, // output height
+        OW = (IW - KW + PW_L + PW_R) / SW + 1; // output width
 
     // Source (src), weights, bias, and destination (dst) tensors
     // dimensions.
@@ -162,26 +205,27 @@ void convolution_example(dnnl::engine::kind engine_kind)
     conv_args.insert({DNNL_ARG_DST, conv_dst_mem});
 
     auto t1 = std::chrono::high_resolution_clock::now();
-    for (int i = 0; i < 100000; i++)
+    for (int i = 0; i < LOOP_NUM; i++)
     {
         // Primitive execution: convolution with ReLU.
         conv_prim.execute(engine_stream, conv_args);
 
         // Reorder the data in case the dst memory descriptor generated by the
         // primitive and the one provided by the user are different.
-        if (conv_pd.dst_desc() != user_dst_mem.get_desc())
-        {
-            reorder(conv_dst_mem, user_dst_mem)
-                .execute(engine_stream, conv_dst_mem, user_dst_mem);
-        }
-        else
-            user_dst_mem = conv_dst_mem;
-
-        // Wait for the computation to finalize.
-        engine_stream.wait();
     }
     auto t2 = std::chrono::high_resolution_clock::now();
-    std::cout << "Ran time = " << std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count() << std::endl;
+    std::cout << "Ran time = " << std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count() << " ms" << std::endl;
+
+    if (conv_pd.dst_desc() != user_dst_mem.get_desc())
+    {
+        reorder(conv_dst_mem, user_dst_mem)
+            .execute(engine_stream, conv_dst_mem, user_dst_mem);
+    }
+    else
+        user_dst_mem = conv_dst_mem;
+
+    // Wait for the computation to finalize.
+    engine_stream.wait();
 
     // Read data from memory object's handle.
     read_from_dnnl_memory(dst_data.data(), user_dst_mem);
