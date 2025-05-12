@@ -26,7 +26,7 @@ set(PROJECT_NAME "study_onednn")
 set(PROJECT_FULL_NAME "Study oneAPI Deep Neural Network Library (oneDNN)")
 set(PROJECT_VERSION "2.7.0")
 
-add_subdirectory(3rd/oneDNN)
+# add_subdirectory(3rd/oneDNN)
 
 if (CMAKE_VERSION VERSION_LESS 3.0)
     project(${PROJECT_NAME} C CXX)
@@ -88,16 +88,14 @@ if(UNIX OR MINGW)
     endif()
 endif()
 
-# one dnn
-
-
-# find_package(dnnl REQUIRED PATHS ${CMAKE_CURRENT_SOURCE_DIR}/3rd/oneDNN/build/install/lib/cmake/dnnl/)
+# onednn
+find_package(dnnl REQUIRED PATHS ${CMAKE_CURRENT_SOURCE_DIR}/3rd/oneDNN/build/install/lib/cmake/dnnl/)
 # add_subdirectory(${DNNL_DIR} DNNL)
-include_directories(${DNNL_DIR}/include)
+# include_directories(${DNNL_DIR}/include)
 
 INCLUDE_DIRECTORIES(
-    ${CMAKE_CURRENT_SOURCE_DIR}/3rd/oneDNN/include/
-    /home/xiping/mydisk2_2T/ov_cpu/study_onednn/3rd/oneDNN/include/
+    ${CMAKE_CURRENT_SOURCE_DIR}/3rd/oneDNN/build/install/include/
+    ${CMAKE_CURRENT_SOURCE_DIR}/3rd/oneDNN/build/install/include/oneapi/
     ${CMAKE_CURRENT_SOURCE_DIR}/header/
     )
 
@@ -108,6 +106,7 @@ SOURCE_GROUP("Include" FILES ${HEADER_FILES})
 
 ADD_EXECUTABLE(${PROJECT_NAME} ${HEADER_FILES} ${SRC_FILES})
 
+target_link_directories(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/3rd/oneDNN/build/install/lib/)
 target_link_libraries(${PROJECT_NAME} dnnl)
 # target_link_libraries(${PROJECT_NAME} DNNL::dnnl)
 
