@@ -109,9 +109,9 @@ std::shared_ptr<MM_Inputs> get_inputs(bool is_integer, memory::data_type &type,
     auto c_md = memory::desc(output_dims, type, memory::format_tag::any);
 
     auto a_in_md = memory::desc(
-        input_dims, memory::data_type::f32, memory::format_tag::ab);
+        input_dims, memory::data_type::f32, memory::format_tag::abc);
     auto b_in_md = memory::desc(
-        weight_dims, memory::data_type::f32, memory::format_tag::ab);
+        weight_dims, memory::data_type::f32, memory::format_tag::abc);
 
     auto a_in_mem = memory(a_in_md, engine);
     auto b_in_mem = memory(b_in_md, engine);
@@ -153,14 +153,15 @@ void matmul_example(dnnl::engine::kind engine_kind) {
     bool is_integer
             = (type == memory::data_type::s8 || type == memory::data_type::u8);
     bool quick_test = false;
-    int runs = 1;
+    int runs = 20;
 
     std::vector<std::shared_ptr<MM_Inputs>> vec_inputs;
-    for (int i = 0; i < runs; i++) {
+    for (int i = 1; i < runs; i++) {
         int m = 1024, n = 1024, k = 768;
-        memory::dims input_dims = {m, k};
-        memory::dims weighs_dims = {k, n};
-        memory::dims output_dims = {m, n};
+        int batch = i % 5 + 1;
+        memory::dims input_dims = {batch, m, k};
+        memory::dims weighs_dims = {1, k, n};
+        memory::dims output_dims = {batch, m, n};
         auto input = get_inputs(is_integer, type, engine, engine_stream, input_dims, weighs_dims, output_dims);
 
         vec_inputs.push_back(std::move(input));
@@ -211,6 +212,6 @@ int getting_started_test_matmul(int argc, char **argv) {
     std::cout << "Start: matmul_example ..................." << std::endl;
     int exit_code = 0;
 
-    matmul_example(dnnl::engine::kind::cpu);
+    matmul_example(dnnl::engine::kind::gpu);
     return exit_code;
 }
