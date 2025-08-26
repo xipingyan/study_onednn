@@ -104,24 +104,91 @@ std::shared_ptr<MM_Inputs> get_inputs(bool is_integer, memory::data_type &type,
 
     // Create memory descriptors and memory objects for src, weights, bias, and
     // dst.
-    auto a_md = memory::desc(input_dims, type, memory::format_tag::any);
-    auto b_md = memory::desc(weight_dims, type, memory::format_tag::any);
-    auto c_md = memory::desc(output_dims, type, memory::format_tag::any);
+    // jit:gemm:any,undef,
+    // src:f16::blocked:abc::f0 
+    // wei:u4::blocked:cab::f0 
+    // dst:f16::blocked:abc::f0,
+    // attr-scratchpad:user attr-fpmath:f16:true 
+    // attr-scales:wei:6:f16:128x1 
+    // attr-zero-points:wei:6:u8:128x1 
+    // attr-post-ops:binary_add:f16:4,,1x1x2048:1x2048x2048
 
-    auto a_in_md = memory::desc(
-        input_dims, memory::data_type::f32, memory::format_tag::abc);
-    auto b_in_md = memory::desc(
-        weight_dims, memory::data_type::f32, memory::format_tag::abc);
+    auto a_md = memory::desc(input_dims, memory::data_type::f16, memory::format_tag::any);
+    auto b_md = memory::desc(weight_dims, memory::data_type::u4, memory::format_tag::any);
+    auto c_md = memory::desc(output_dims, memory::data_type::f16, memory::format_tag::any);
+    
+    int N = output_dims[2];
+#define ENALBE_BIAS 0
+#define ATTRIBUT_POST_OPS 0
+#define ATTRIBUT_POST_OPS_BIN_ADD 1
+#define ATTRIBUT_SCALE_ZP 0    // Not work. I don't know why?
+
+#if ENALBE_BIAS
+    memory::dims bias_dims = {1, 1, N};
+    std::vector<float> bias_data(product(bias_dims));
+    std::generate(bias_data.begin(), bias_data.end(), []()
+                  {
+        static int i = 0;
+        return std::tanh(float(i++)); });
+    auto bias_md = memory::desc(
+        bias_dims, memory::data_type::f32, memory::format_tag::abc);
+#endif
+
+    auto a_in_md = memory::desc(input_dims, memory::data_type::f32, memory::format_tag::abc);
+    auto b_in_md = memory::desc(weight_dims, memory::data_type::f32, memory::format_tag::abc);
+    auto binary_md = memory::desc(output_dims, memory::data_type::f16, memory::format_tag::abc);
 
     auto a_in_mem = memory(a_in_md, engine);
     auto b_in_mem = memory(b_in_md, engine);
+#if ENALBE_BIAS
+    auto bias_mem = memory(bias_md, engine);
+#endif
 
     // Write data to memory object's handles.
     write_to_dnnl_memory(a_data.data(), a_in_mem);
     write_to_dnnl_memory(b_data.data(), b_in_mem);
+#if ENALBE_BIAS
+    write_to_dnnl_memory(bias_data.data(), bias_mem);
+#endif
+
+    primitive_attr matmul_attr;
+#if ATTRIBUT_POST_OPS
+    // Create primitive post-ops (ReLU).
+    const float alpha = 0.f;
+    const float beta = 0.f;
+    post_ops matmul_ops;
+    matmul_ops.append_eltwise(algorithm::eltwise_relu, alpha, beta);
+    matmul_attr.set_post_ops(matmul_ops);
+#endif
+
+#if ATTRIBUT_SCALE_ZP
+    std::vector<float> scale_A(128, 1.0f);
+    std::vector<float> zp_A(128, 1.0f);
+
+    auto scale_md = memory::desc({128, 1}, memory::data_type::f16, memory::format_tag::ab);
+    auto scale_mem = memory(scale_md, engine);    
+    auto zp_md = memory::desc({128, 1}, memory::data_type::f16, memory::format_tag::ab);
+    auto zp_mem = memory(zp_md, engine);
+    
+    std::vector<float> scale_data(product({128, 1}));
+    std::vector<float> zp_data(product({128, 1}));
+    fill_random(scale_data, false);
+    fill_random(zp_data, false);
+
+    write_to_dnnl_memory(scale_data.data(), scale_mem);
+    write_to_dnnl_memory(zp_data.data(), zp_mem);
+#endif
+
+    // 设置 FP16 数学模式
+    matmul_attr.set_fpmath_mode(fpmath_mode::f16);
+    matmul_attr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
 
     // Create primitive descriptor.
-    input->matmul_pd = matmul::primitive_desc(engine, a_md, b_md, c_md);
+#if ENALBE_BIAS
+    input->matmul_pd = matmul::primitive_desc(engine, a_md, b_md, bias_md, c_md, matmul_attr);
+#else
+    input->matmul_pd = matmul::primitive_desc(engine, a_md, b_md, c_md, matmul_attr);
+#endif
 
     // Repack and convert input data.
     input->a_mem = memory(input->matmul_pd.src_desc(), engine);
@@ -138,6 +205,14 @@ std::shared_ptr<MM_Inputs> get_inputs(bool is_integer, memory::data_type &type,
     input->matmul_args.insert({DNNL_ARG_SRC, input->a_mem});
     input->matmul_args.insert({DNNL_ARG_WEIGHTS, input->b_mem});
     input->matmul_args.insert({DNNL_ARG_DST, input->c_mem});
+
+#if ENALBE_BIAS
+    input->matmul_args.insert({DNNL_ARG_BIAS, bias_mem});
+#endif
+#if ATTRIBUT_SCALE_ZP
+    input->matmul_args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, scale_mem});
+    input->matmul_args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, zp_mem});
+#endif
 
     return input;
 }
@@ -159,9 +234,12 @@ void matmul_example(dnnl::engine::kind engine_kind) {
     for (int i = 1; i < runs; i++) {
         int m = 1024, n = 1024, k = 768;
         int batch = i % 5 + 1;
-        memory::dims input_dims = {batch, m, k};
-        memory::dims weighs_dims = {1, k, n};
-        memory::dims output_dims = {batch, m, n};
+
+        // 1x1x2048:1x2048x2048
+        // int batch = 1;        
+        memory::dims input_dims = {batch, 1, 2048};
+        memory::dims weighs_dims = {1, 2048, 2048};
+        memory::dims output_dims = {batch, 1, 2048};
         auto input = get_inputs(is_integer, type, engine, engine_stream, input_dims, weighs_dims, output_dims);
 
         vec_inputs.push_back(std::move(input));
@@ -186,6 +264,7 @@ void matmul_example(dnnl::engine::kind engine_kind) {
 
     for (int i = 0; i < vec_inputs.size(); i++)
     {
+        std::cout << "Infer: [" << i << "], batch = " << vec_inputs[i]->a_mem.get_desc().get_dims()[0] << std::endl;
         vec_inputs[i]->matmul_prim.execute(engine_stream, vec_inputs[i]->matmul_args);
         engine_stream.wait();
     }
