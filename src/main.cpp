@@ -5,6 +5,7 @@
 int main(int argc, char **argv)
 {
     // getting_started_test_relu(argc, argv);
-    getting_started_test_conv(argc, argv);
+    // getting_started_test_conv(argc, argv);
+    getting_started_test_matmul(argc, argv);
     return EXIT_SUCCESS;
 }
