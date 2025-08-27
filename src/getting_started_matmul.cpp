@@ -82,6 +82,9 @@ struct MM_Inputs
     dnnl::memory b_mem;
     dnnl::memory c_mem;
 
+    dnnl::memory zp_mem;
+    dnnl::memory scale_mem;
+
     matmul::primitive_desc matmul_pd;
     dnnl::matmul matmul_prim;
 
@@ -113,15 +116,15 @@ std::shared_ptr<MM_Inputs> get_inputs(bool is_integer, memory::data_type &type,
     // attr-zero-points:wei:6:u8:128x1 
     // attr-post-ops:binary_add:f16:4,,1x1x2048:1x2048x2048
 
-    auto a_md = memory::desc(input_dims, memory::data_type::f16, memory::format_tag::any);
-    auto b_md = memory::desc(weight_dims, memory::data_type::u4, memory::format_tag::any);
-    auto c_md = memory::desc(output_dims, memory::data_type::f16, memory::format_tag::any);
+    auto a_md = memory::desc(input_dims, memory::data_type::f16, memory::format_tag::abc);
+    auto b_md = memory::desc(weight_dims, memory::data_type::u4, memory::format_tag::cab);
+    auto c_md = memory::desc(output_dims, memory::data_type::f16, memory::format_tag::abc);
     
     int N = output_dims[2];
-#define ENALBE_BIAS 0
-#define ATTRIBUT_POST_OPS 0
-#define ATTRIBUT_POST_OPS_BIN_ADD 1
-#define ATTRIBUT_SCALE_ZP 0    // Not work. I don't know why?
+#define ENALBE_BIAS 0               // work
+#define ATTRIBUT_POST_OPS 0         // work
+#define ATTRIBUT_POST_OPS_BIN_ADD 0 // Not work.
+#define ATTRIBUT_SCALE_ZP 1         // Not work.
 
 #if ENALBE_BIAS
     memory::dims bias_dims = {1, 1, N};
@@ -161,22 +164,37 @@ std::shared_ptr<MM_Inputs> get_inputs(bool is_integer, memory::data_type &type,
     matmul_attr.set_post_ops(matmul_ops);
 #endif
 
-#if ATTRIBUT_SCALE_ZP
-    std::vector<float> scale_A(128, 1.0f);
-    std::vector<float> zp_A(128, 1.0f);
+#if ATTRIBUT_POST_OPS_BIN_ADD
+    dnnl::post_ops po;
+    po.append_binary(
+        dnnl::algorithm::binary_add,
+        dnnl::memory::desc(
+            input_dims,
+            dnnl::memory::data_type::f16,
+            dnnl::memory::format_tag::abcd));
+    matmul_attr.set_post_ops(po);
+#endif
 
-    auto scale_md = memory::desc({128, 1}, memory::data_type::f16, memory::format_tag::ab);
+#if ATTRIBUT_SCALE_ZP
+    dnnl::memory::dims zp_dims = {128, 1};
+    auto scale_md = memory::desc(zp_dims, memory::data_type::f16, memory::format_tag::ab);
     auto scale_mem = memory(scale_md, engine);    
-    auto zp_md = memory::desc({128, 1}, memory::data_type::f16, memory::format_tag::ab);
+    auto zp_md = memory::desc(zp_dims, memory::data_type::u8, memory::format_tag::ab);
     auto zp_mem = memory(zp_md, engine);
     
-    std::vector<float> scale_data(product({128, 1}));
-    std::vector<float> zp_data(product({128, 1}));
+    std::vector<float> scale_data(product(zp_dims));
+    std::vector<float> zp_data(product(zp_dims));
     fill_random(scale_data, false);
-    fill_random(zp_data, false);
+    fill_random(zp_data, true);
 
     write_to_dnnl_memory(scale_data.data(), scale_mem);
     write_to_dnnl_memory(zp_data.data(), zp_mem);
+
+    // matmul_attr.set_scales_mask(DNNL_ARG_WEIGHTS, 6);
+    // matmul_attr.set_zero_points_mask(DNNL_ARG_WEIGHTS, 6);
+
+    // matmul_attr.set_scales(DNNL_ARG_WEIGHTS, 6, zp_dims, dnnl::memory::data_type::f16);
+    matmul_attr.set_zero_points(DNNL_ARG_WEIGHTS, 6, zp_dims, dnnl::memory::data_type::u8);
 #endif
 
     // 设置 FP16 数学模式
@@ -210,8 +228,8 @@ std::shared_ptr<MM_Inputs> get_inputs(bool is_integer, memory::data_type &type,
     input->matmul_args.insert({DNNL_ARG_BIAS, bias_mem});
 #endif
 #if ATTRIBUT_SCALE_ZP
-    input->matmul_args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_SRC, scale_mem});
-    input->matmul_args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_SRC, zp_mem});
+    input->matmul_args.insert({DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS, scale_mem});
+    input->matmul_args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS, zp_mem});
 #endif
 
     return input;
@@ -236,7 +254,7 @@ void matmul_example(dnnl::engine::kind engine_kind) {
         int batch = i % 5 + 1;
 
         // 1x1x2048:1x2048x2048
-        // int batch = 1;        
+        // batch = 1;
         memory::dims input_dims = {batch, 1, 2048};
         memory::dims weighs_dims = {1, 2048, 2048};
         memory::dims output_dims = {batch, 1, 2048};
